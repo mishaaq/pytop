@@ -67,8 +67,7 @@ class ProcessesModule(object):
     def update_descriptions(self):
         pid = self.processes_list[self.highlighted_line + self.first_line_to_paint][0]
         file_name = '/proc/' + pid + '/stat'
-        try:
-            file = open(file_name)
+        with open(file_name) as file:
             data = file.readline().split()
             self.query.pid = data[0]
             self.query.command = data[1]
@@ -76,8 +75,6 @@ class ProcessesModule(object):
             self.query.utime = data[13]
             self.query.priority = data[18]
             self.query.vsize = data[22]
-        except:
-            return
 
     def paint(self):
         self.list_area.clear()

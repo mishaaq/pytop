@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import curses
+from time import sleep
 import time
 
 class ClockModule(object):
@@ -25,8 +26,9 @@ class ClockModule(object):
 
     def run(self, semaphore):
         while(1):
-            self.current_time = time.strftime("%Y%m%d %H:%M:%S")
+            self.current_time = time.strftime("%Y-%m-%d %H:%M:%S")
             with semaphore:
                 self.paint()
+            sleep(1)
 
 
