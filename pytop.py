@@ -4,6 +4,7 @@
 
 import curses
 import sys
+import traceback
 from threading import Thread
 from threading import Semaphore
 
@@ -32,7 +33,6 @@ def main(argv=None):
 #        clock_mod_process.join()
 #        proc_mod.run()
 #        clock_mod_process.terminate()
-        
     finally:
         curses.nocbreak()
         curses.echo()

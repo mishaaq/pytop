@@ -2,6 +2,7 @@
 
 import curses
 import commands
+import traceback
 
 class StatusQuery(object):
     def __init__(self):
@@ -9,8 +10,9 @@ class StatusQuery(object):
         self.command = None
         self.state = None
         self.utime = None
-        self.priority = None
-        self.vsize = None
+        self.stime = None
+        self.nice = None
+        self.mem = None
 
 class ProcessesModule(object):
     def __init__(self, screen):
@@ -67,15 +69,21 @@ class ProcessesModule(object):
     def update_descriptions(self):
         pid = self.processes_list[self.highlighted_line + self.first_line_to_paint][0]
         file_name = '/proc/' + pid + '/stat'
-        with open(file_name) as file:
-            data = file.readline().split()
-            self.query.pid = data[0]
-            self.query.command = data[1]
-            self.query.state = data[3]
-            self.query.utime = data[13]
-            self.query.priority = data[18]
-            self.query.vsize = data[22]
-
+        try:
+            with open(file_name) as file:
+                data = file.readline().split()
+                self.query.pid = data[0]
+                self.query.command = data[1]
+                self.query.state = data[2]
+                self.query.utime = float(data[13])
+                self.query.stime = float(data[14])
+                self.query.nice = data[18]
+            with open(file_name + 'm') as file:
+                data = file.readline().split()
+                self.query.mem = data[0]
+        except IOError:
+            pass
+        
     def paint(self):
         self.list_area.clear()
         max_lines = self.window_rect_dict['list_area'][0]
@@ -94,13 +102,14 @@ class ProcessesModule(object):
         self.desc_area.addstr(0, 0, 'PID: ' + self.query.pid)
         self.desc_area.addstr(1, 0, 'COMM: ' + self.query.command)
         self.desc_area.addstr(2, 0, 'STATE: ' + self.query.state)
-        self.desc_area.addstr(3, 0, 'UTIME: ' + self.query.utime)
-        self.desc_area.addstr(4, 0, 'PRIORITY: ' + self.query.priority)
-        self.desc_area.addstr(5, 0, 'VSIZE: ' + self.query.vsize)
+        self.desc_area.addstr(3, 0, 'UTIME: %5f s' % (self.query.utime / 250.0))
+        self.desc_area.addstr(4, 0, 'STIME: %5f s' % (self.query.stime / 250.0))
+        self.desc_area.addstr(5, 0, 'NICE: ' + self.query.nice)
+        self.desc_area.addstr(6, 0, 'MEM: ' + self.query.mem + ' kB')
         self.desc_area.refresh()
 
         self.list_area.refresh()
-
+    
     def move_highlight(self, lines):
         if lines < 0:
             if self.highlighted_line == 0:
@@ -116,17 +125,22 @@ class ProcessesModule(object):
                     self.first_line_to_paint = len(self.processes_list) - self.window_rect_dict['list_area'][0]
             else:
                 self.highlighted_line += 1
-                    
+    
     def run(self, semaphore):
-        while 1:
-            self.update_descriptions()
-            with semaphore:
-                self.paint()
-            char = self.list_area.getkey()
-            if char == 'q':
-                break;
-            if char == 'i':
-                self.move_highlight(-1)
-            if char == 'k':
-                self.move_highlight(1)
-        
+        try:
+            while True:
+                self.update_descriptions()
+                with semaphore:
+                    self.paint()
+                char = self.list_area.getkey()
+                if char == 'q':
+                    break;
+                if char == 'i':
+                    self.move_highlight(-1)
+                if char == 'k':
+                    self.move_highlight(1)
+        except:
+            curses.nocbreak()
+            curses.echo()
+            curses.endwin()
+            traceback.print_exc()
