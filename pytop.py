@@ -4,7 +4,6 @@
 
 import curses
 import sys
-import traceback
 from threading import Thread
 from threading import Semaphore
 

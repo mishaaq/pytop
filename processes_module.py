@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 
+import os
+import re
 import curses
-import commands
+import operator
 import traceback
 
-class StatusQuery(object):
+class ProcessStatus(object):
     def __init__(self):
         self.pid = None
+        self.name = None
         self.command = None
         self.state = None
         self.utime = None
@@ -54,58 +57,64 @@ class ProcessesModule(object):
 
         self.highlighted_line = 0
         self.first_line_to_paint = 0
-        self.query = StatusQuery()
 
-        self.refresh_processes_list()
+        # lista informacji o procesach w systemie
+        self.status_list = []
 
-    def refresh_processes_list(self):
-        self.processes_list = []
-        processes_buffer = commands.getoutput('ps -A').splitlines()
-        del processes_buffer[0]
-        for line in processes_buffer:
-            line = line.strip().split()
-            self.processes_list.append((line[0], line[3]))
+        # wyrażenie regułowe testujące nazwy katalogów (przechodzą katalogi-pidy)
+        self.directory_pattern = re.compile(r'\d+')
 
-    def update_descriptions(self):
-        pid = self.processes_list[self.highlighted_line + self.first_line_to_paint][0]
-        file_name = '/proc/' + pid + '/stat'
-        try:
-            with open(file_name) as file:
-                data = file.readline().split()
-                self.query.pid = data[0]
-                self.query.command = data[1]
-                self.query.state = data[2]
-                self.query.utime = float(data[13])
-                self.query.stime = float(data[14])
-                self.query.nice = data[18]
-            with open(file_name + 'm') as file:
-                data = file.readline().split()
-                self.query.mem = data[0]
-        except IOError:
-            pass
+        # określa, po czym była ostatnio sortowana lista
+        self.last_sort = 'pid'
+        self.reverse = False
+        
+        self.refresh_processes()
+
+    def refresh_processes(self):
+        for entry in os.listdir('/proc/'):
+            if self.directory_pattern.match(entry):
+                base_file_name = '/proc/' + entry
+                try:
+                    status = ProcessStatus()
+                    with open(base_file_name + '/stat') as file:
+                        data = file.readline().split()
+                        status.pid = int(data[0])
+                        status.command = data[1]
+                        status.state = data[2]
+                        status.utime = float(data[13])
+                        status.stime = float(data[14])
+                        status.nice = data[18]
+                    with open(base_file_name + '/statm') as file:
+                        data = file.readline().split()
+                        status.mem = data[0]
+                    with open(base_file_name + '/status') as file:
+                        data = file.readline().split()
+                        status.name = data[1]
+                    self.status_list.append(status)
+                except IOError:
+                    pass
         
     def paint(self):
         self.list_area.clear()
         max_lines = self.window_rect_dict['list_area'][0]
         last_line_to_paint = self.first_line_to_paint + max_lines
-        processes_to_paint = self.processes_list[self.first_line_to_paint:last_line_to_paint]
-        current_row = 0
-        for process in processes_to_paint:
-            name = process[1]
+        processes_to_paint = self.status_list[self.first_line_to_paint:last_line_to_paint]
+        for current_row, process in enumerate(processes_to_paint):
+            name = process.name
             if current_row == self.highlighted_line:
                 self.list_area.addstr(current_row, 0, name[:self.window_rect_dict['list_area'][1]], curses.A_BOLD)
             else:
                 self.list_area.addstr(current_row, 0, name[:self.window_rect_dict['list_area'][1]])
-            current_row += 1
 
         self.desc_area.clear()
-        self.desc_area.addstr(0, 0, 'PID: ' + self.query.pid)
-        self.desc_area.addstr(1, 0, 'COMM: ' + self.query.command)
-        self.desc_area.addstr(2, 0, 'STATE: ' + self.query.state)
-        self.desc_area.addstr(3, 0, 'UTIME: %5f s' % (self.query.utime / 250.0))
-        self.desc_area.addstr(4, 0, 'STIME: %5f s' % (self.query.stime / 250.0))
-        self.desc_area.addstr(5, 0, 'NICE: ' + self.query.nice)
-        self.desc_area.addstr(6, 0, 'MEM: ' + self.query.mem + ' kB')
+        self.desc_area.addstr(0, 0, 'PID: %d' % self.status_list[self.first_line_to_paint+self.highlighted_line].pid)
+        self.desc_area.addstr(1, 0, 'NAME: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].name)
+        self.desc_area.addstr(2, 0, 'COMM: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].command)
+        self.desc_area.addstr(3, 0, 'STATE: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].state)
+        self.desc_area.addstr(4, 0, 'UTIME: %5f s' % (self.status_list[self.first_line_to_paint+self.highlighted_line].utime / 250.0))
+        self.desc_area.addstr(5, 0, 'STIME: %5f s' % (self.status_list[self.first_line_to_paint+self.highlighted_line].stime / 250.0))
+        self.desc_area.addstr(6, 0, 'NICE: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].nice)
+        self.desc_area.addstr(7, 0, 'MEM: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].mem + ' kB')
         self.desc_area.refresh()
 
         self.list_area.refresh()
@@ -121,24 +130,42 @@ class ProcessesModule(object):
         else:
             if self.highlighted_line == self.window_rect_dict['list_area'][0] - 1:
                 self.first_line_to_paint += lines
-                if self.first_line_to_paint + self.window_rect_dict['list_area'][0] > len(self.processes_list):
-                    self.first_line_to_paint = len(self.processes_list) - self.window_rect_dict['list_area'][0]
+                if self.first_line_to_paint + self.window_rect_dict['list_area'][0] > len(self.status_list):
+                    self.first_line_to_paint = len(self.status_list) - self.window_rect_dict['list_area'][0]
             else:
                 self.highlighted_line += 1
-    
+
+    def sort_list(self, by):
+        if by == self.last_sort:
+            self.reverse = not self.reverse
+        else:
+            self.reverse = False
+        self.status_list.sort(key=operator.attrgetter(by), reverse=self.reverse)
+        self.last_sort = by
+
     def run(self, semaphore):
         try:
             while True:
-                self.update_descriptions()
                 with semaphore:
                     self.paint()
-                char = self.list_area.getkey()
+                try:
+                    char = self.list_area.getkey()
+                    {'i': lambda: self.move_highlight(-1),
+                     'k': lambda: self.move_highlight(1),
+                     'u': lambda: self.refresh_processes(),
+                     '1': lambda: self.sort_list('pid'),
+                     '2': lambda: self.sort_list('name'),
+                     '3': lambda: self.sort_list('command'),
+                     '4': lambda: self.sort_list('state'),
+                     '5': lambda: self.sort_list('utime'),
+                     '6': lambda: self.sort_list('stime'),
+                     '7': lambda: self.sort_list('nice'),
+                     '8': lambda: self.sort_list('mem'),
+                    }[char]()
+                except KeyError:
+                    pass
                 if char == 'q':
-                    break;
-                if char == 'i':
-                    self.move_highlight(-1)
-                if char == 'k':
-                    self.move_highlight(1)
+                    break
         except:
             curses.nocbreak()
             curses.echo()
