@@ -20,8 +20,8 @@ def main(argv=None):
         curses.noecho()
         curses.cbreak()
         stdscr.keypad(1)
-        clock_mod = ClockModule(stdscr)
-        proc_mod = ProcessesModule(stdscr)
+        proc_mod = ProcessesModule()
+        clock_mod = ClockModule(method_list=(proc_mod.refresh_processes, proc_mod.paint))
 
         proc_mod_process = Thread(target = proc_mod.run, args = (painting_semaphore, ))
         clock_mod_process = Thread(target = clock_mod.run, args = (painting_semaphore, ))
@@ -29,9 +29,6 @@ def main(argv=None):
         clock_mod_process.start()
 
         proc_mod_process.join()
-#        clock_mod_process.join()
-#        proc_mod.run()
-#        clock_mod_process.terminate()
     finally:
         curses.nocbreak()
         curses.echo()
