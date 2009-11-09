@@ -20,11 +20,11 @@ def main(argv=None):
         curses.noecho()
         curses.cbreak()
         stdscr.keypad(1)
-        proc_mod = ProcessesModule()
-        clock_mod = ClockModule(method_list=(proc_mod.refresh_processes, proc_mod.paint))
+        proc_mod = ProcessesModule(semaphore=painting_semaphore)
+        clock_mod = ClockModule(semaphore=painting_semaphore, method_list=(proc_mod.refresh_processes,))
 
-        proc_mod_process = Thread(target = proc_mod.run, args = (painting_semaphore, ))
-        clock_mod_process = Thread(target = clock_mod.run, args = (painting_semaphore, ))
+        proc_mod_process = Thread(target = proc_mod.run)
+        clock_mod_process = Thread(target = clock_mod.run)
         proc_mod_process.start()
         clock_mod_process.start()
 

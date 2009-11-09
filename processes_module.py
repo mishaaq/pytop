@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import pwd, grp
 import re
 import curses
 import operator
@@ -19,9 +20,11 @@ class ProcessStatus(object):
         self.sperc = 0
         self.nice = None
         self.mem = None
+        self.user = None
+        self.group = None
 
 class ProcessesModule(object):
-    def __init__(self, method_list=None):
+    def __init__(self, semaphore, method_list=None):
         self.window_rect_dict = {}
         self.window_rect_dict['list_window'] = [8*curses.LINES/10, curses.COLS/2, 2*curses.LINES/10, 0]
         self.window_rect_dict['list_area'] = [8*curses.LINES/10 - 2, curses.COLS/2 - 2, 2*curses.LINES/10 + 1, 1]
@@ -34,14 +37,16 @@ class ProcessesModule(object):
                                          self.window_rect_dict['list_window'][3])
         self.list_window.box(curses.ACS_VLINE, curses.ACS_HLINE)
         self.list_window.refresh()
-        self.list_window.nodelay(0)
+        self.list_window.nodelay(1)
+        self.list_window.timeout(0)
 
         self.list_area = curses.newwin(self.window_rect_dict['list_area'][0],
                                        self.window_rect_dict['list_area'][1],
                                        self.window_rect_dict['list_area'][2],
                                        self.window_rect_dict['list_area'][3])
         self.list_area.refresh()
-        self.list_area.nodelay(0)
+        self.list_area.nodelay(1)
+        self.list_area.timeout(0)
 
         self.desc_window = curses.newwin(self.window_rect_dict['desc_window'][0],
                                          self.window_rect_dict['desc_window'][1],
@@ -49,14 +54,16 @@ class ProcessesModule(object):
                                          self.window_rect_dict['desc_window'][3])
         self.desc_window.box(curses.ACS_VLINE, curses.ACS_HLINE)
         self.desc_window.refresh()
-        self.desc_window.nodelay(0)
+        self.desc_window.nodelay(1)
+        self.desc_window.timeout(0)
 
         self.desc_area = curses.newwin(self.window_rect_dict['desc_area'][0],
                                        self.window_rect_dict['desc_area'][1],
                                        self.window_rect_dict['desc_area'][2],
                                        self.window_rect_dict['desc_area'][3])
         self.desc_area.refresh()
-        self.desc_area.nodelay(0)
+        self.desc_area.nodelay(1)
+        self.desc_area.timeout(0)
 
         self.highlighted_line = 0
         self.first_line_to_paint = 0
@@ -72,12 +79,15 @@ class ProcessesModule(object):
         self.reverse = False
 
         self.freeze = False
+
+        self.semaphore = semaphore
         
         self.refresh_processes()
 
     def refresh_processes(self):
         if self.freeze:
             return
+        self.semaphore.acquire()
         old_status_list = copy.deepcopy(self.status_list)
         del self.status_list[:]
         for entry in os.listdir('/proc/'):
@@ -95,10 +105,19 @@ class ProcessesModule(object):
                         status.nice = data[18]
                     with open(base_file_name + '/statm') as file:
                         data = file.readline().split()
-                        status.mem = data[0]
+                        status.mem = int(data[0])
                     with open(base_file_name + '/status') as file:
                         data = file.readline().split()
                         status.name = data[1]
+                        file.readline()
+                        file.readline()
+                        file.readline()
+                        file.readline()
+                        file.readline()
+                        data = file.readline().split()
+                        status.user = pwd.getpwuid(int(data[1]))[0]
+                        data = file.readline().split()
+                        status.group = grp.getgrgid(int(data[1]))[0]
                     try:
                         old_status = (stat for stat in old_status_list if stat.name == status.name).next()
                         status.uperc = status.utime - old_status.utime
@@ -110,8 +129,10 @@ class ProcessesModule(object):
                 except IOError:
                     pass
         self.sort_list()
-        
+        self.semaphore.release()
+    
     def paint(self):
+        self.semaphore.acquire()
         self.list_area.clear()
         max_lines = self.window_rect_dict['list_area'][0]
         last_line_to_paint = self.first_line_to_paint + max_lines
@@ -130,11 +151,14 @@ class ProcessesModule(object):
         self.desc_area.addstr(3, 0, 'STATE: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].state)
         self.desc_area.addstr(4, 0, 'UTIME: %3.1f %%' % self.status_list[self.first_line_to_paint+self.highlighted_line].uperc)
         self.desc_area.addstr(5, 0, 'STIME: %3.1f %%' % self.status_list[self.first_line_to_paint+self.highlighted_line].sperc)
-        self.desc_area.addstr(6, 0, 'NICE: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].nice)
-        self.desc_area.addstr(7, 0, 'MEM: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].mem + ' kB')
+        self.desc_area.addstr(6, 0, 'USER: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].user)
+        self.desc_area.addstr(7, 0, 'GROUP: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].group)
+        self.desc_area.addstr(8, 0, 'NICE: ' + self.status_list[self.first_line_to_paint+self.highlighted_line].nice)
+        self.desc_area.addstr(9, 0, 'MEM: %d kB' % self.status_list[self.first_line_to_paint+self.highlighted_line].mem)
         self.desc_area.refresh()
 
         self.list_area.refresh()
+        self.semaphore.release()
     
     def move_highlight(self, lines):
         if self.last_sort in ['uperc', 'sperc'] and not self.freeze:
@@ -165,13 +189,15 @@ class ProcessesModule(object):
         self.status_list.sort(key=operator.attrgetter(by), reverse=self.reverse)
         self.last_sort = by
 
-    def run(self, semaphore):
+    def run(self):
         try:
             while True:
-                with semaphore:
-                    self.paint()
+                self.paint()
                 try:
-                    char = self.list_area.getkey()
+                    try:
+                        char = self.list_area.getkey()
+                    except:
+                        char = None
                     {'i': lambda: self.move_highlight(-1),
                      'k': lambda: self.move_highlight(1),
                      '1': lambda: self.sort_list('pid'),
@@ -180,8 +206,10 @@ class ProcessesModule(object):
                      '4': lambda: self.sort_list('state'),
                      '5': lambda: self.sort_list('uperc'),
                      '6': lambda: self.sort_list('stime'),
-                     '7': lambda: self.sort_list('nice'),
-                     '8': lambda: self.sort_list('mem'),
+                     '7': lambda: self.sort_list('user'),
+                     '8': lambda: self.sort_list('group'),
+                     '9': lambda: self.sort_list('nice'),
+                     '0': lambda: self.sort_list('mem'),
                     }[char]()
                 except KeyError:
                     pass
